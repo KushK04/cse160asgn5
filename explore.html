@@ -1,0 +1,501 @@
+<!--
+Kush Khanna
+kukhanna@ucsc.edu
+Notes To Graders:
+Used Three.js tutorials 
+Credit:
+    - Herobrine model: Inspired by Steve Model from Minecraft: https://sketchfab.com/3d-models/herobrine-996fb378bdec43e1ab6fd059e37ca65a
+    - Conquest Texture: From Invincible Comic made by Robert Kirkman
+    - Blocky Textures: All other textures were taken from the game Minecraft, which is owned by Mojang 
+-->
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="stylesheet" href="explore.css">
+    <meta charset="utf-8" />
+    <title>Exploring!</title>
+</head>
+
+<body>
+    <canvas id="c"></canvas>
+
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "./three.js-master/build/three.module.js",
+            "three/addons/": "./three.js-master/examples/jsm/"
+        }
+    }
+    </script>   
+
+    <script type="module">
+    import * as THREE from 'three';
+    import {OBJLoader} from 'three/addons/loaders/OBJLoader.js';
+    import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+    import {MTLLoader} from 'three/addons/loaders/MTLLoader.js';
+    import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    class DegRadHelper {
+        constructor(obj, prop) {
+            this.obj = obj;
+            this.prop = prop;
+        }
+        get value() {
+            return THREE.MathUtils.radToDeg(this.obj[this.prop]);
+        }
+        set value(v) {
+            this.obj[this.prop] = THREE.MathUtils.degToRad(v);
+        }
+    }
+
+    function makeXYZGUI(gui, vector3, name, onChangeFn) {
+        const folder = gui.addFolder(name);
+        folder.add(vector3, 'x', -10, 10).onChange(onChangeFn);
+        folder.add(vector3, 'y', 0, 10).onChange(onChangeFn);
+        folder.add(vector3, 'z', -10, 10).onChange(onChangeFn);
+        folder.open();
+    }
+
+    function main() {
+        //Core scene elements
+        const canvas = document.querySelector('#c');
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            canvas,
+            logarithmicDepthBuffer: true,
+        });
+        
+        const rtWidth = 512;
+        const rtHeight = 512;
+        const renderTarget = new THREE.WebGLRenderTarget(rtWidth, rtHeight);
+        const rtFov = 75;
+        const rtAspect = rtWidth / rtHeight;
+        const rtNear = 0.1;
+        const rtFar = 5;
+        const rtCamera = new THREE.PerspectiveCamera(rtFov, rtAspect, rtNear, rtFar);
+        rtCamera.position.z = 2;
+        
+        const rtScene = new THREE.Scene();
+        rtScene.background = new THREE.Color('red');
+        const scene = new THREE.Scene();
+
+        const width = window.innerWidth; 
+        const height = window.innerHeight;
+        renderer.setSize(width, height);
+
+        //Lighting
+        const color = 0xFFFFFF;
+        const intensity = 3;
+        const light = new THREE.DirectionalLight(color, intensity);
+        light.position.set(0, 10, 0);
+        light.target.position.set(-5, 0, 0);
+        scene.add(light);
+        rtScene.add(light);
+        scene.add(light.target);
+        const helper = new THREE.DirectionalLightHelper(light);
+        scene.add(helper);
+
+        function updateLight() {
+            light.target.updateMatrixWorld();
+            helper.update();
+        }
+        updateLight();
+
+        
+        const color2 = 0xFFFFFF;
+        const intensity2 = 2;
+        const light2 = new THREE.AmbientLight(color2, intensity2); 
+        light.position.set(2, 2, 4);
+        scene.add(light2);
+
+        const color3 = 0xFFFFFF;
+        const intensity3 = 150;
+        const light3 = new THREE.SpotLight(color3, intensity3);
+        scene.add(light3);   
+        scene.add(light3.target);
+        const helper2 = new THREE.SpotLightHelper(light);
+        scene.add(helper2);
+
+        window.addEventListener('resize', () => {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        renderer.setSize(width, height);
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        });
+
+        //GUI Helpers
+        class MinMaxGUIHelper {
+            constructor(obj, minProp, maxProp, minDif) {
+                this.obj = obj;
+                this.minProp = minProp;
+                this.maxProp = maxProp;
+                this.minDif = minDif;
+            }
+            get min() {
+                return this.obj[this.minProp];
+            }
+            set min(v) {
+                this.obj[this.minProp] = v;
+                this.obj[this.maxProp] = Math.max(this.obj[this.maxProp], v + this.minDif);
+            }
+            get max() {
+                return this.obj[this.maxProp];
+            }
+            set max(v) {
+                this.obj[this.maxProp] = v;
+                this.min = this.min;  // this will call the min setter
+            }
+        }
+
+        class ColorGUIHelper {
+            constructor(object, prop) {
+                this.object = object;
+                this.prop = prop;
+            }
+            get value() {
+                return `#${this.object[this.prop].getHexString()}`;
+            }
+            set value(hexString) {
+                this.object[this.prop].set(hexString);
+            }
+        }
+
+        class FogGUIHelper {
+            constructor(fog) {
+                this.fog = fog;
+                this._near = fog.near;
+                this._far = fog.far;
+            }
+
+            get near() {
+                return this._near;
+            }
+            set near(v) {
+                this._near = v;
+                this.fog.near = v;
+            }
+
+            get far() {
+                return this._far;
+            }
+            set far(v) {
+                this._far = v;
+                this.fog.far = v;
+            }
+
+            get color() {
+                return `#${this.fog.color.getHexString()}`;
+            }
+            set color(hexString) {
+                this.fog.color.set(hexString);
+            }
+        }
+
+
+        //Picking
+        function getCanvasRelativePosition(event) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (event.clientX - rect.left) * canvas.width  / rect.width,
+                y: (event.clientY - rect.top ) * canvas.height / rect.height,
+            };
+        }
+        
+        function setPickPosition(event) {
+            const pos = getCanvasRelativePosition(event);
+            pickPosition.x = (pos.x / canvas.width ) *  2 - 1;
+            pickPosition.y = (pos.y / canvas.height) * -2 + 1;  // note we flip Y
+        }
+        
+        function clearPickPosition() {
+            // unlike the mouse which always has a position
+            // if the user stops touching the screen we want
+            // to stop picking. For now we just pick a value
+            // unlikely to pick something
+            pickPosition.x = -100000;
+            pickPosition.y = -100000;
+        }
+ 
+
+        class PickHelper {
+    constructor() {
+        this.raycaster = new THREE.Raycaster();
+        this.pickedObject = null;
+        this.pickedObjectSavedColor = 0;
+    }
+
+    pick(normalizedPosition, scene, camera, time) {
+        // Restore the color if there is a picked object
+        if (this.pickedObject) {
+            if (this.pickedObject.material && this.pickedObject.material.emissive) {
+                this.pickedObject.material.emissive.setHex(this.pickedObjectSavedColor);
+            }
+            this.pickedObject = undefined;
+        }
+
+        // Cast a ray through the frustum
+        this.raycaster.setFromCamera(normalizedPosition, camera);
+
+        // Get the list of objects the ray intersected
+        const intersectedObjects = this.raycaster.intersectObjects(scene.children);
+        
+        if (intersectedObjects.length) {
+            // Pick the first object. It's the closest one
+            this.pickedObject = intersectedObjects[0].object;
+            
+            // Ensure the picked object has a material with emissive property
+            if (this.pickedObject.material && this.pickedObject.material.emissive) {
+                // Save its color
+                this.pickedObjectSavedColor = this.pickedObject.material.emissive.getHex();
+                
+                // Set its emissive color to flashing red/yellow
+                this.pickedObject.material.emissive.setHex(0xFFFF00);
+            }
+        }
+    }
+}
+
+
+        const pickPosition = {x: 0, y: 0};
+        clearPickPosition();
+        window.addEventListener('mousemove', setPickPosition);
+        window.addEventListener('mouseout', clearPickPosition);
+        window.addEventListener('mouseleave', clearPickPosition);
+
+        //Fog
+        const fogColor = 'lightblue';
+        const fogNear = 0;
+        const fogFar = 75;
+        scene.fog = new THREE.Fog(fogColor, fogNear, fogFar)
+
+        //Camera
+        const fov = 25;
+        const aspect = 2;  // the canvas default
+        const near = 0.1;
+        const far = 100;
+        const camera = new THREE.PerspectiveCamera(fov, aspect, near, far);
+        const cameraHelper = new THREE.CameraHelper(camera);
+        //scene.add(cameraHelper);
+        //camera.position.z = 2;
+        camera.position.set(0,10,20);
+        //const view1Elem = document.querySelector('#view1');
+        //const view2Elem = document.querySelector('#view2');
+        function updateCamera() {
+            camera.updateProjectionMatrix();
+        }
+        
+        const gui = new GUI();
+        gui.add(camera, 'fov', 1, 180).onChange(updateCamera);
+        const minMaxGUIHelper = new MinMaxGUIHelper(camera, 'near', 'far', 0.1);
+        gui.add(minMaxGUIHelper, 'min', 0.1, 50, 0.1).name('near').onChange(updateCamera);
+        gui.add(minMaxGUIHelper, 'max', 0.1, 50, 0.1).name('far').onChange(updateCamera);
+        const fogGUIHelper = new FogGUIHelper(scene.fog, 0.1, 1000);
+        gui.add(fogGUIHelper, 'near', 0, 100).listen().name('FogNear');
+        gui.add(fogGUIHelper, 'far', 0, 100).listen().name('FogFar');
+        gui.addColor(fogGUIHelper, 'color').name('FogColor');
+        gui.addColor(new ColorGUIHelper(light2, 'color'), 'value').name('AmbientColor');
+        gui.add(light2, 'intensity', 0, 5, 0.01);
+        gui.addColor(new ColorGUIHelper(light3, 'color'), 'value').name('SpotLightColor');
+        gui.add(new DegRadHelper(light3, 'angle'), 'value', 0, 90).name('SpotlightAngle').onChange(updateLight);
+        gui.add(light3, 'penumbra', 0, 1, 0.01);
+        gui.add(light3, 'intensity', 0, 150, 0.01);
+        gui.addColor(new ColorGUIHelper(light, 'color'), 'value').name('DirectionalColor');
+        gui.add(light, 'intensity', 0, 5, 0.01);
+        makeXYZGUI(gui, light.position, 'DirectionalPosition', updateLight);
+        makeXYZGUI(gui, light.target.position, 'DirectionalTarget', updateLight);
+        makeXYZGUI(gui, light3.position, 'SpotlightPosition', updateLight);
+        makeXYZGUI(gui, light3.target.position, 'SpotlightTarget', updateLight);
+
+        const controls = new OrbitControls(camera, canvas);
+        controls.target.set(0,0,0);
+        controls.update();
+
+
+        //Cube w/ Conquest Texture
+        const boxWidth = 1;
+        const boxHeight = 1;
+        const boxDepth = 1;
+        const geometry = new THREE.BoxGeometry(boxWidth, boxHeight, boxDepth);
+
+        const loader = new THREE.TextureLoader();
+        const texture = loader.load( './conquest.png' );
+        texture.colorSpace = THREE.SRGBColorSpace;
+        const material = new THREE.MeshPhongMaterial({map: texture}); 
+        
+        function makeInstance(geometry, colorOrMaterial, x, isTexture, z) {
+            if (!isTexture){
+                colorOrMaterial = new THREE.MeshPhongMaterial({color: colorOrMaterial});
+            }
+            
+            const cube = new THREE.Mesh(geometry, colorOrMaterial);
+            scene.add(cube);
+            
+            cube.position.x = x;
+            cube.position.z = z;
+            
+            return cube;
+        }
+
+        function makeInstanceRT(geometry, color, x) {
+            const material = new THREE.MeshPhongMaterial({color});
+            
+            const cube = new THREE.Mesh(geometry, material);
+            rtScene.add(cube);
+            
+            cube.position.x = x;
+            
+            return cube;
+        }
+
+        const woodMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/wood.webp')});
+        const diaMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/diamond.webp')});
+        const cactusMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/cactus.jpg')});
+        const coalMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/coal.png')});
+        const dirtMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/dirt.webp')});
+        const emeraldMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/emerald.png')});
+        const goldMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/gold.webp')});
+        const guideMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/guide.png')});
+        const hayMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/hay.png')});
+        const ironMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/iron.jpg')});
+        const lavaMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/lava.webp')});
+        const netherMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/netherock.jpg')});
+        const noteMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/note.jpg')});
+        const obsMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/obs.jpg')});
+        const redstoneMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/redstone.webp')});
+        const sandMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/sand.jpeg')});
+        const tntMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/tnt.jpg')});
+        const woolMat = new THREE.MeshPhongMaterial({map: loader.load('./textures/wool.png')});
+
+        const cubes = [
+            makeInstance(geometry, material,  0, true, 0),
+            makeInstance(geometry, woodMat, - 2, true, 0),
+            makeInstance(geometry, diaMat,  2, true, 0),
+            makeInstance(geometry, cactusMat, -2, true, -8),
+            makeInstance(geometry, coalMat, 2, true, -8),
+            makeInstance(geometry, dirtMat, -2, true, -6),
+            makeInstance(geometry, emeraldMat, 2, true, -6),
+            makeInstance(geometry, goldMat, -2, true, -4),
+            makeInstance(geometry, guideMat, 2, true, -4),
+            makeInstance(geometry, hayMat, -2, true, -2),
+            makeInstance(geometry, ironMat, 2, true, -2),
+            makeInstance(geometry, lavaMat, -2, true, 2),
+            makeInstance(geometry, netherMat, 2, true, 2),
+            makeInstance(geometry, noteMat, -2, true, 4),
+            makeInstance(geometry, obsMat, 2, true, 4),
+            makeInstance(geometry, redstoneMat, -2, true, 6),
+            makeInstance(geometry, sandMat, 2, true, 6),
+            makeInstance(geometry, tntMat, -2, true, 8),
+            makeInstance(geometry, woolMat, 2, true, 8)
+        ];
+
+        cubes[0].position.set(-1,2,-1);
+
+        const rtCubes = [
+        makeInstanceRT(geometry, 0x44aa88,  0),
+        makeInstanceRT(geometry, 0x8844aa, -2),
+        makeInstanceRT(geometry, 0xaa8844,  2),
+        ];
+
+        const material2 = new THREE.MeshPhongMaterial({
+        map: renderTarget.texture,
+        });
+        const cubeTrippy = new THREE.Mesh(geometry, material2);
+        cubeTrippy.position.set(1,2,-1);
+        cubes.push(cubeTrippy);
+        scene.add(cubeTrippy);
+
+        //PLANE
+        {
+
+            const planeSize = 20;
+
+            const loader = new THREE.TextureLoader();
+            const texture = loader.load( './stone2.png' );
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.magFilter = THREE.NearestFilter;
+            //texture.colorSpace = THREE.SRGBColorSpace;
+            const repeats = planeSize / 2;
+            texture.repeat.set( repeats, repeats );
+
+            const planeGeo = new THREE.PlaneGeometry( planeSize, planeSize );
+            const planeMat = new THREE.MeshPhongMaterial( {
+                map: texture,
+                side: THREE.DoubleSide,
+            } );
+            const mesh = new THREE.Mesh( planeGeo, planeMat );
+            mesh.rotation.x = Math.PI * - .5;
+            mesh.position.set(0,-1,0);
+            scene.add( mesh );
+
+        }
+
+        //Skybox
+        {
+            const loader = new THREE.TextureLoader();
+            const texture = loader.load(
+                'skybox2.jpg',
+                () => {
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+                texture.colorSpace = THREE.SRGBColorSpace;
+                scene.background = texture;
+            });
+        }
+
+        //HEORBRINE model
+        {
+        const gltfLoader = new GLTFLoader();
+            gltfLoader.load('./Herobrine.glb', (gltf) => {
+                const model = gltf.scene;
+                model.position.set(0, -1.05, -1); 
+                model.scale.set(0.25, 0.25, 0.25); 
+                scene.add(model);
+            }, undefined, (error) => {
+                console.error('Error');
+            });
+        }
+
+
+        const pickHelper = new PickHelper();
+        //Render / Animations
+        function render(time) {
+            time *= 0.001;  // convert time to seconds
+            
+            cubes.forEach((cube, ndx) => {  
+                const speed = 1 + ndx * .1;
+                const rot = time * speed;
+                cube.rotation.x = rot;
+                cube.rotation.y = rot;
+            });
+
+            rtCubes.forEach((cube, ndx) => {
+                const speed = 1 + ndx * .1;
+                const rot = time * speed;
+                cube.rotation.x = rot;
+                cube.rotation.y = rot;
+            });
+
+            pickHelper.pick(pickPosition, scene, camera, time);
+            
+            renderer.render(scene, camera);
+            renderer.setRenderTarget(renderTarget);
+            renderer.render(rtScene, rtCamera);
+            renderer.setRenderTarget(null);
+            
+            requestAnimationFrame(render);
+            }
+        requestAnimationFrame(render);
+    }
+    main();
+    </script>
+
+
+</body> 
+
+
+</html> 
